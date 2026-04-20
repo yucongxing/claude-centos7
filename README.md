@@ -8,7 +8,7 @@ New releases are published automatically within 6 hours of each upstream Claude 
 
 **No root needed. Works from any directory.**
 
-Download the latest release tarball from the [Releases page](../../releases/latest), then:
+Download the latest release tarball from the [Releases page](https://github.com/yucongxing/claude-centos7/releases/latest), then:
 
 ```bash
 tar xzf claude-centos7-v*.tar.gz
