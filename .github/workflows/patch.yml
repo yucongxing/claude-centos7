@@ -52,6 +52,7 @@ jobs:
       - name: Download Claude Code musl binary
         if: steps.check.outputs.skip == 'false'
         run: |
+          set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           PKG_URL="https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64-musl/${VERSION}"
           TARBALL_URL=$(curl -sf "$PKG_URL" | jq -r '.dist.tarball') || {
@@ -63,7 +64,7 @@ jobs:
             exit 1
           fi
           echo "Downloading from: $TARBALL_URL"
-          curl -sL "$TARBALL_URL" | tar xz
+          curl -sfL "$TARBALL_URL" | tar xz
           mv package/claude claude-bin
           chmod +x claude-bin
           echo "Binary size: $(du -sh claude-bin | cut -f1)"
@@ -104,7 +105,7 @@ jobs:
           [ -f uninstall.sh ] && cp uninstall.sh claude-centos7/
           tar czf "$TARBALL" claude-centos7/
           echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
-          echo "Release artifact: $(du -sh $TARBALL | cut -f1)"
+          echo "Release artifact: $(du -sh "$TARBALL" | cut -f1)"
 
       - name: Create GitHub Release
         if: steps.check.outputs.skip == 'false'
