@@ -5,3 +5,11 @@ libs/
 package/
 *.tgz
 *.tar.gz
+
+# Local Claude Code harness — not part of the project
+.claude/
+docs/
+openspec/
+
+# Workflow staging directory
+claude-centos7/
