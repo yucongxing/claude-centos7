@@ -1,0 +1,144 @@
+name: Patch Claude Code for CentOS 7
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get latest Claude Code version
+        id: version
+        run: |
+          RESPONSE=$(curl -sf "https://registry.npmjs.org/@anthropic-ai/claude-code/latest") || {
+            echo "ERROR: Failed to reach npm registry" >&2
+            exit 1
+          }
+          VERSION=$(echo "$RESPONSE" | jq -r '.version')
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "ERROR: Could not parse version from npm response" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected Claude Code version: $VERSION"
+
+      - name: Check if release already exists
+        id: check
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release v${VERSION} already exists, skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version v${VERSION} detected, proceeding."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        if: steps.check.outputs.skip == 'false'
+        run: sudo apt-get install -y musl jq
+
+      - name: Download Claude Code musl binary
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PKG_URL="https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64-musl/${VERSION}"
+          TARBALL_URL=$(curl -sf "$PKG_URL" | jq -r '.dist.tarball') || {
+            echo "ERROR: Failed to fetch musl package metadata for version ${VERSION}" >&2
+            exit 1
+          }
+          if [ -z "$TARBALL_URL" ] || [ "$TARBALL_URL" = "null" ]; then
+            echo "ERROR: No tarball URL for @anthropic-ai/claude-code-linux-x64-musl@${VERSION}" >&2
+            exit 1
+          fi
+          echo "Downloading from: $TARBALL_URL"
+          curl -sL "$TARBALL_URL" | tar xz
+          mv package/claude claude-bin
+          chmod +x claude-bin
+          echo "Binary size: $(du -sh claude-bin | cut -f1)"
+
+      - name: Bundle musl libc
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          mkdir -p libs
+          cp /usr/lib/x86_64-linux-musl/libc.so libs/ld-musl-x86_64.so.1
+          chmod +x libs/ld-musl-x86_64.so.1
+          ln -sf ld-musl-x86_64.so.1 libs/libc.musl-x86_64.so.1
+          MUSL_VERSION=$(dpkg-query -W -f='${Version}' musl 2>/dev/null || echo "unknown")
+          echo "musl_version=$MUSL_VERSION" >> "$GITHUB_ENV"
+          echo "Bundled musl $MUSL_VERSION ($(du -sh libs/ld-musl-x86_64.so.1 | cut -f1))"
+
+      - name: Create wrapper script
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          cat > claude << 'WRAPPER'
+          #!/bin/bash
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          exec env LD_LIBRARY_PATH="$SCRIPT_DIR/libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+               "$SCRIPT_DIR/libs/ld-musl-x86_64.so.1" \
+               "$SCRIPT_DIR/claude-bin" "$@"
+          WRAPPER
+          chmod +x claude
+
+      - name: Package release artifact
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TARBALL="claude-centos7-v${VERSION}-linux-x64.tar.gz"
+          mkdir -p claude-centos7
+          cp claude claude-centos7/
+          cp claude-bin claude-centos7/
+          cp -r libs claude-centos7/
+          [ -f install.sh ]   && cp install.sh   claude-centos7/
+          [ -f uninstall.sh ] && cp uninstall.sh claude-centos7/
+          tar czf "$TARBALL" claude-centos7/
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          echo "Release artifact: $(du -sh $TARBALL | cut -f1)"
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
+          cat > /tmp/release-notes.md << NOTES
+          ## Claude Code v${VERSION} — CentOS 7 patch
+
+          Patched Claude Code to run on CentOS 7 (glibc 2.17+, kernel 3.10+).
+
+          ### How it works
+          Uses Anthropic's official musl-linked build (\`@anthropic-ai/claude-code-linux-x64-musl\`) with a bundled musl libc. A shell wrapper invokes the musl dynamic linker directly, bypassing the ELF interpreter path. No patchelf, no root access needed.
+
+          ### What's bundled
+          - Claude Code v${VERSION} (musl variant, official Anthropic build)
+          - musl libc ${musl_version}
+
+          ### Install (no root needed)
+          \`\`\`bash
+          VERSION=${VERSION}
+          curl -LO https://github.com/${REPO}/releases/download/v\${VERSION}/claude-centos7-v\${VERSION}-linux-x64.tar.gz
+          tar xzf claude-centos7-v\${VERSION}-linux-x64.tar.gz
+          ./claude-centos7/claude --version
+          \`\`\`
+
+          Or install to \`~/.local/bin\`:
+          \`\`\`bash
+          cd claude-centos7 && bash install.sh
+          \`\`\`
+          NOTES
+          gh release create "v${VERSION}" \
+            --title "Claude Code v${VERSION} for CentOS 7" \
+            --notes-file /tmp/release-notes.md \
+            "${{ env.TARBALL }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
