@@ -124,7 +124,7 @@ jobs:
           - Claude Code v${VERSION} (musl variant, official Anthropic build)
           - musl libc ${musl_version}
 
-          ### Install (no root needed)
+          ### Install (internet access)
           \`\`\`bash
           VERSION=${VERSION}
           curl -LO https://github.com/${REPO}/releases/download/v\${VERSION}/claude-centos7-v\${VERSION}-linux-x64.tar.gz
@@ -134,6 +134,26 @@ jobs:
 
           Or install to \`~/.local/bin\`:
           \`\`\`bash
+          cd claude-centos7 && bash install.sh
+          \`\`\`
+
+          ### Install (no direct internet access)
+          On a machine **with** internet access, download the tarball:
+          \`\`\`bash
+          VERSION=${VERSION}
+          curl -LO https://github.com/${REPO}/releases/download/v\${VERSION}/claude-centos7-v\${VERSION}-linux-x64.tar.gz
+          \`\`\`
+
+          Transfer it to your CentOS 7 machine (replace \`user@host\` as needed):
+          \`\`\`bash
+          scp claude-centos7-v\${VERSION}-linux-x64.tar.gz user@centos7-host:~
+          \`\`\`
+
+          On the CentOS 7 machine:
+          \`\`\`bash
+          tar xzf claude-centos7-v\${VERSION}-linux-x64.tar.gz
+          ./claude-centos7/claude --version
+          # Optional: install to ~/.local/bin
           cd claude-centos7 && bash install.sh
           \`\`\`
           NOTES
